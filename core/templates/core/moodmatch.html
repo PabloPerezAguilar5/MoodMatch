@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoodMatch - Encuentra contenido basado en tus emociones</title>
+    <style>
+        :root {
+            --primary-color: #6c5ce7;
+            --error-color: #ff7675;
+            --success-color: #00b894;
+        }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f6fa;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .form-container {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            margin-bottom: 1rem;
+            resize: vertical;
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: opacity 0.2s;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        .error-message {
+            background-color: var(--error-color);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 1rem 0;
+        }
+
+        .results {
+            margin-top: 2rem;
+        }
+
+        .card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .emotion-tag {
+            display: inline-block;
+            background: var(--primary-color);
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            margin-right: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .emotion-tag.secondary {
+            background: var(--success-color);
+        }
+
+        .fallback-notice {
+            background-color: #ffeaa7;
+            color: #6c5ce7;
+            padding: 10px 15px;
+            border-radius: 5px;
+            margin: 1rem 0;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .fallback-notice::before {
+            content: "ℹ️";
+            font-size: 1.2rem;
+        }
+
+        .emotions {
+            margin-bottom: 1.5rem;
+        }
+
+        .book-description {
+            font-size: 0.9rem;
+            color: #666;
+            margin: 0.5rem 0;
+            line-height: 1.4;
+        }
+
+        .recommendation {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+
+        .recommendation-icon {
+            font-size: 2rem;
+        }
+
+        .recommendation-content {
+            flex: 1;
+        }
+
+        .recommendation-link {
+            display: inline-block;
+            background: var(--primary-color);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 25px;
+            margin-top: 10px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+            box-shadow: 0 2px 5px rgba(108, 92, 231, 0.2);
+        }
+
+        .recommendation-link:hover {
+            text-decoration: none;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(108, 92, 231, 0.3);
+            background: #5d4de6;
+        }
+
+        .recommendation-link i {
+            margin-left: 8px;
+            font-size: 0.9em;
+        }
+
+        a {
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .song-preview {
+            width: 100%;
+            max-width: 300px;
+            margin: 0.5rem 0;
+            border-radius: 20px;
+            height: 32px;
+        }
+
+        audio::-webkit-media-controls-panel {
+            background-color: var(--primary-color);
+        }
+
+        audio::-webkit-media-controls-current-time-display,
+        audio::-webkit-media-controls-time-remaining-display {
+            color: white;
+        }
+    </style>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const textarea = document.querySelector('textarea[name="texto"]');
+            
+            textarea.addEventListener('keydown', function(e) {
+                // Enviar el formulario si se presiona Enter sin la tecla Shift
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault(); // Prevenir el salto de línea
+                    this.form.submit(); // Enviar el formulario
+                }
+            });
+        });
+    </script>
+</head>
+<body>
+    <h1>MoodMatch 🎭</h1>
+    
+    <div class="form-container">
+        <form method="post">
+            {% csrf_token %}
+            <textarea 
+                name="texto" 
+                rows="4" 
+                placeholder="¿Cómo te sientes hoy?"
+                maxlength="500"
+                required></textarea>
+            <button type="submit">Analizar Emoción</button>
+        </form>
+    </div>
+
+    {% if error %}
+        <div class="error-message">
+            {{ error }}
+        </div>
+    {% endif %}
+
+    {% if emotion %}
+        <div class="results">
+            <div class="card">
+                <h2>Emociones detectadas:</h2>
+                <div class="emotions">
+                    <span class="emotion-tag">{{ emotion }}</span>
+                    {% if secondary_emotion and secondary_emotion != emotion %}
+                        <span class="emotion-tag secondary">{{ secondary_emotion }}</span>
+                    {% endif %}
+                </div>
+
+                {% if is_fallback %}
+                    <div class="fallback-notice">
+                        Usando análisis de respaldo debido a problemas temporales con el servicio de IA.
+                    </div>
+                {% endif %}
+
+                {% if trend_message %}
+                    <div class="trend-message">
+                        <div class="recommendation-content">
+                            <h3>Análisis de Tendencia</h3>
+                            <p>{{ trend_message }}</p>
+                        </div>
+                    </div>
+                {% endif %}
+
+                {% if song %}
+                    <div class="recommendation">
+                        <div class="recommendation-icon">🎵</div>
+                        <div class="recommendation-content">
+                            <h3>Canción Recomendada</h3>
+                            <p><strong>{{ song.name }}</strong> por {{ song.artist }}</p>
+                            {% if song.preview_url %}
+                                <audio controls class="song-preview">
+                                    <source src="{{ song.preview_url }}" type="audio/mpeg">
+                                    Tu navegador no soporta el elemento de audio.
+                                </audio>
+                            {% endif %}
+                            <a href="{{ song.url }}" target="_blank" rel="noopener" class="recommendation-link">Escuchar en Spotify <i>🎵</i></a>
+                        </div>
+                    </div>
+                {% endif %}
+
+                {% if book %}
+                    <div class="recommendation">
+                        <div class="recommendation-icon">📚</div>
+                        <div class="recommendation-content">
+                            <h3>Libro Recomendado</h3>
+                            <p><strong>{{ book.title }}</strong> por {{ book.author }}</p>
+                            {% if book.description %}
+                                <p class="book-description">{{ book.description }}</p>
+                            {% endif %}
+                            <a href="{{ book.url }}" target="_blank" rel="noopener" class="recommendation-link">Ver en Google Books <i>📖</i></a>
+                        </div>
+                    </div>
+                {% endif %}
+
+                {% if advice %}
+                    <div class="recommendation">
+                        <div class="recommendation-icon">💭</div>
+                        <div class="recommendation-content">
+                            <h3>Consejo del día</h3>
+                            <p><strong>{{ advice.phrase }}</strong></p>
+                            <p class="book-description">{{ advice.advice }}</p>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+</body>
+</html>

@@ -1,0 +1,88 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrastyle %}
+<style>
+    .stats-container {
+        padding: 20px;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin: 20px 0;
+    }
+    .chart-container {
+        position: relative;
+        height: 400px;
+        width: 100%;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="stats-container">
+    <h1>{{ title }}</h1>
+    
+    <div class="chart-container">
+        <canvas id="emotionsChart"></canvas>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const ctx = document.getElementById('emotionsChart').getContext('2d');
+    
+    const dates = JSON.parse('{{ dates_json|safe }}');
+    const emotions = JSON.parse('{{ emotions_json|safe }}');
+    const data = JSON.parse('{{ data_json|safe }}');
+    
+    const colors = [
+        '#FF6384',  // joy
+        '#36A2EB',  // sadness
+        '#FFCE56',  // anger
+        '#4BC0C0',  // fear
+        '#9966FF',  // surprise
+        '#FF9F40',  // disgust
+        '#C9CBCF'   // neutral
+    ];
+    
+    const datasets = emotions.map((emotion, index) => ({
+        label: emotion,
+        data: dates.map(date => data[date][emotion] || 0),
+        borderColor: colors[index % colors.length],
+        backgroundColor: colors[index % colors.length],
+        fill: false,
+        tension: 0.4
+    }));
+    
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: dates,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1
+                    }
+                }
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Tendencias Emocionales por Día'
+                },
+                legend: {
+                    position: 'bottom'
+                }
+            }
+        }
+    });
+});
+</script>
+{% endblock %} 
