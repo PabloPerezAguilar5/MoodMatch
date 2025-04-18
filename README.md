@@ -1,4 +1,4 @@
-# MoodMatch 🎭
+# MoodMatch 
 
 MoodMatch is a web application that analyzes your emotions and recommends music and books based on how you feel. It uses artificial intelligence to understand your emotions and provide personalized recommendations.
 
