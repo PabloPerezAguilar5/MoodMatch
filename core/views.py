@@ -12,12 +12,30 @@ from dotenv import load_dotenv
 from spotipy.exceptions import SpotifyException
 from .models import EmotionalEntry
 from django.db.models import Count
+from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
 
 # Cargar variables de entorno
 load_dotenv()
 
 # Configurar logging
 logger = logging.getLogger(__name__)
+
+# Inicializar el modelo de análisis de emociones
+try:
+    logger.info("Cargando modelo de Hugging Face...")
+    model_name = "pysentimiento/robertuito-emotion-analysis"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name)
+    emotion_classifier = pipeline(
+        "text-classification",
+        model=model,
+        tokenizer=tokenizer,
+        device="cpu"  # Forzar CPU para evitar errores de CUDA
+    )
+    logger.info("Modelo de Hugging Face cargado correctamente")
+except Exception as e:
+    logger.error(f"Error al cargar el modelo de Hugging Face: {str(e)}", exc_info=True)
+    emotion_classifier = None
 
 def validate_text(text):
     if not text or len(text.strip()) == 0:
@@ -28,60 +46,96 @@ def validate_text(text):
 
 def get_emotion(text, max_retries=3):
     """
-    Intenta obtener la emoción usando la API de HuggingFace.
+    Intenta obtener la emoción usando Hugging Face.
     Si falla, usa el análisis de fallback.
     """
-    # Temporalmente forzamos el uso del fallback para debuggear
-    logger.info("Usando análisis fallback para debug")
-    return fallback_emotion_analysis(text)
+    logger.info("="*50)
+    logger.info(f"INICIO análisis de texto: '{text}'")
+    
+    if emotion_classifier is None:
+        logger.warning("Modelo de Hugging Face no disponible, usando fallback")
+        return fallback_emotion_analysis(text)
+
+    try:
+        # Obtener predicciones del modelo
+        logger.info("Intentando usar Hugging Face...")
+        prediction = emotion_classifier(text)
+        logger.info(f"ÉXITO - Predicción de Hugging Face: {prediction}")
+
+        # Mapear las etiquetas del modelo a nuestras categorías
+        emotion_mapping = {
+            "joy": "joy",
+            "sadness": "sadness",
+            "anger": "anger",
+            "fear": "fear",
+            "surprise": "joy",  # Mapeamos surprise a joy por defecto
+            "others": "joy"     # Cualquier otra emoción la mapeamos a joy
+        }
+
+        # Obtener la emoción principal
+        primary_label = prediction[0]['label']
+        score = prediction[0]['score']
+        logger.info(f"Emoción detectada: {primary_label} con confianza: {score:.2f}")
+        
+        primary_emotion = emotion_mapping.get(primary_label, "joy")
+        
+        # Para la emoción secundaria, usamos el fallback
+        _, secondary_emotion = fallback_emotion_analysis(text)
+
+        logger.info(f"Emociones FINALES - HF primaria: {primary_emotion}, secundaria: {secondary_emotion}")
+        logger.info("="*50)
+        return primary_emotion, secondary_emotion
+
+    except Exception as e:
+        logger.error(f"ERROR al usar Hugging Face: {str(e)}", exc_info=True)
+        logger.info("Cayendo al análisis fallback")
+        return fallback_emotion_analysis(text)
 
 def fallback_emotion_analysis(text):
-    """Análisis simple de emociones basado en palabras clave cuando la API falla"""
+    """Análisis simple de emociones basado en palabras clave"""
     text = text.lower().strip()
-    logger.info(f"Analizando texto: '{text}'")
+    logger.info(f"INICIO análisis fallback para: '{text}'")
 
-    # Diccionario simplificado para debug
+    # Diccionario simplificado de emociones y palabras clave
     emotion_keywords = {
         "joy": [
-            "feliz", "contento", "contenta", "alegre", "bien",
-            "genial", "fantástico", "excelente"
+            "feliz", "contento", "contenta", "alegre", "genial",
+            "fantástico", "fantástica", "excelente", "bien", "bueno", "buena"
         ],
         "sadness": [
-            "triste", "mal", "deprimido", "deprimida"
+            "triste", "mal", "deprimido", "deprimida", "dolor",
+            "pena", "melancolía", "melancolico", "melancolica"
         ],
         "anger": [
-            "enojado", "enojada", "molesto", "molesta", "furioso", "furiosa"
-        ],
-        "love": [
-            "enamorado", "enamorada", "amor", "quiero", "adoro"
+            "enojado", "enojada", "molesto", "molesta", "furioso",
+            "furiosa", "rabia", "ira", "bronca"
         ],
         "fear": [
-            "miedo", "asustado", "asustada", "preocupado", "preocupada"
+            "miedo", "asustado", "asustada", "temor", "terror",
+            "preocupado", "preocupada", "ansioso", "ansiosa"
+        ],
+        "love": [
+            "amor", "enamorado", "enamorada", "quiero", "adoro",
+            "cariño", "amo"
         ]
     }
 
-    # Contar coincidencias de palabras clave
+    # Contar coincidencias
     emotion_scores = {emotion: 0 for emotion in emotion_keywords}
-    
-    # Analizar palabra por palabra
     words = text.split()
-    logger.info(f"Palabras encontradas: {words}")
-
+    
     for word in words:
         logger.info(f"Analizando palabra: '{word}'")
         for emotion, keywords in emotion_keywords.items():
             if word in keywords:
-                emotion_scores[emotion] += 2
-                logger.info(f"Coincidencia exacta encontrada para {emotion}: {word}")
-            elif any(keyword in word for keyword in keywords):
                 emotion_scores[emotion] += 1
-                logger.info(f"Coincidencia parcial encontrada para {emotion}: {word}")
+                logger.info(f"¡Coincidencia encontrada!: {word} -> {emotion}")
 
-    logger.info(f"Puntajes finales: {emotion_scores}")
+    logger.info(f"Puntajes finales del fallback: {emotion_scores}")
 
-    # Si no hay coincidencias
+    # Si no hay coincidencias, usar joy como default
     if all(score == 0 for score in emotion_scores.values()):
-        logger.info("No se encontraron coincidencias, usando valor por defecto")
+        logger.info("No se encontraron coincidencias, usando 'joy' por defecto")
         return "joy", "love"
 
     # Obtener las dos emociones con más coincidencias
@@ -89,178 +143,64 @@ def fallback_emotion_analysis(text):
     primary = sorted_emotions[0][0]
     secondary = sorted_emotions[1][0] if len(sorted_emotions) > 1 and sorted_emotions[1][1] > 0 else primary
 
-    logger.info(f"Emociones detectadas: primaria={primary}, secundaria={secondary}")
+    logger.info(f"Emociones FINALES del fallback: primaria={primary}, secundaria={secondary}")
     return primary, secondary
 
 def get_spotify_recommendations(emotion, secondary_emotion, sp):
-    # Lista predefinida de géneros válidos de Spotify (verificados y seguros)
-    SPOTIFY_GENRES = [
-        "pop", "rock", "hip-hop", "latin"
-    ]
-
-    # Mapeo simple de emociones a configuraciones musicales
-    emotion_music_mapping = {
-        "joy": {
-            "genres": ["pop", "latin"],
-            "min_valence": 0.6,
-            "min_energy": 0.6,
-            "target_tempo": 120
-        },
-        "sadness": {
-            "genres": ["rock"],
-            "max_valence": 0.4,
-            "max_energy": 0.4,
-            "target_tempo": 80
-        },
-        "anger": {
-            "genres": ["rock", "hip-hop"],
-            "min_energy": 0.7,
-            "target_tempo": 130
-        },
-        "fear": {
-            "genres": ["rock"],
-            "max_valence": 0.3,
-            "target_instrumentalness": 0.6
-        },
-        "love": {
-            "genres": ["pop", "latin"],
-            "target_valence": 0.7,
-            "target_acousticness": 0.5
-        }
-    }
-
+    """
+    Obtiene recomendaciones musicales de Spotify basadas en la emoción.
+    """
     try:
-        # Obtener configuración para la emoción primaria
-        config = emotion_music_mapping.get(emotion, emotion_music_mapping["joy"])
-        
-        # Filtrar géneros válidos
-        valid_genres = [g for g in config["genres"] if g in SPOTIFY_GENRES]
-        
-        if not valid_genres:
-            valid_genres = ["pop"]  # Género seguro por defecto
-        
-        # Limitar a 2 géneros máximo
-        seed_genres = valid_genres[:2]
-        
-        # Parámetros base de recomendación
-        params = {
-            "seed_genres": seed_genres,
-            "limit": 10  # Pedimos más para tener más opciones
+        # Mapeo simple de emociones a términos de búsqueda
+        search_terms = {
+            "joy": "happy dance pop",
+            "sadness": "sad acoustic",
+            "anger": "rock metal",
+            "fear": "ambient chill",
+            "love": "romantic love songs"
         }
-        
-        # Agregar parámetros de audio si existen
-        audio_features = {k: v for k, v in config.items() 
-                         if k not in ["genres"] and isinstance(v, (int, float))}
-        params.update(audio_features)
 
-        logger.info(f"Solicitando recomendaciones con parámetros: {params}")
+        # Usar búsqueda simple en lugar de recomendaciones
+        search_term = search_terms.get(emotion, "pop")
+        logger.info(f"Buscando canciones con término: {search_term}")
         
         try:
-            # Intentar obtener recomendaciones
-            recommendations = sp.recommendations(**params)
-            if recommendations and recommendations['tracks']:
-                tracks = recommendations['tracks']
-                # Filtrar tracks que tengan preview_url
+            result = sp.search(q=search_term, type="track", limit=10)
+            if result and result['tracks']['items']:
+                tracks = result['tracks']['items']
+                # Preferir tracks con preview_url
                 valid_tracks = [t for t in tracks if t.get('preview_url')]
-                if valid_tracks:
-                    track = random.choice(valid_tracks)
-                else:
-                    track = random.choice(tracks)
-            else:
-                raise ValueError("No se encontraron recomendaciones")
-                
-        except (SpotifyException, ValueError) as e:
-            # Si falla la recomendación, intentar búsqueda simple
-            logger.warning(f"Error en recomendaciones: {str(e)}, intentando búsqueda simple")
-            mood_terms = {
-                "joy": ["happy", "upbeat", "fun"],
-                "sadness": ["sad", "melancholic", "slow"],
-                "anger": ["powerful", "intense", "strong"],
-                "fear": ["calm", "peaceful", "quiet"],
-                "love": ["romantic", "love song", "sweet"]
-            }
-            
-            search_term = random.choice(mood_terms.get(emotion, mood_terms["joy"]))
-            search_genre = random.choice(seed_genres)
-            
-            try:
-                result = sp.search(q=f"genre:{search_genre} {search_term}", 
-                                 type="track", limit=10)
-                
-                if not result['tracks']['items']:
-                    # Si no hay resultados con género, intentar sin género
-                    result = sp.search(q=search_term, type="track", limit=10)
-                    
-                if not result['tracks']['items']:
-                    raise ValueError("No se encontraron canciones")
-                
-                # Intentar encontrar una canción con preview_url
-                valid_tracks = [t for t in result['tracks']['items'] if t.get('preview_url')]
-                track = random.choice(valid_tracks) if valid_tracks else random.choice(result['tracks']['items'][:5])
-                
-            except Exception as e:
-                logger.error(f"Error en búsqueda simple: {str(e)}")
-                raise
+                track = random.choice(valid_tracks if valid_tracks else tracks)
+                return {
+                    "name": track["name"],
+                    "artist": track["artists"][0]["name"],
+                    "url": track["external_urls"]["spotify"],
+                    "preview_url": track.get("preview_url"),
+                }
+        except Exception as e:
+            logger.error(f"Error en búsqueda de Spotify: {e}")
 
-        return {
-            "name": track["name"],
-            "artist": track["artists"][0]["name"],
-            "url": track["external_urls"]["spotify"],
-            "preview_url": track.get("preview_url"),
-        }
-        
     except Exception as e:
-        logger.error(f"Error obteniendo recomendación de Spotify: {str(e)}")
-        raise
-
-def get_book_recommendation(emotion, secondary_emotion):
-    # Mapeo más detallado de emociones a términos de búsqueda de libros
-    emotion_book_mapping = {
-        "joy": ["inspirational", "humor", "feel-good", "comedy", "uplifting"],
-        "sadness": ["moving", "emotional", "literary fiction", "drama", "poetry"],
-        "anger": ["empowerment", "social justice", "revolution", "transformation"],
-        "fear": ["psychological thriller", "mystery", "suspense", "gothic"],
-        "surprise": ["magical realism", "science fiction", "fantasy", "adventure"],
-        "disgust": ["dystopian", "dark fiction", "critique", "satire"],
-        "love": ["romance", "relationships", "contemporary love", "passion"]
+        logger.error(f"Error general de Spotify: {e}")
+    
+    # Si algo falla, retornar respuesta por defecto
+    return {
+        "name": "No se pudo obtener canción",
+        "artist": "Intente más tarde",
+        "url": "#",
+        "preview_url": None
     }
 
-    # Combinar términos de búsqueda de ambas emociones
-    primary_terms = emotion_book_mapping.get(emotion, ["fiction"])
-    secondary_terms = emotion_book_mapping.get(secondary_emotion, ["fiction"])
-    
-    # Elegir términos al azar de ambas listas
-    search_terms = random.sample(primary_terms, 1) + random.sample(secondary_terms, 1)
-    search_query = " ".join(search_terms)
-
-    try:
-        response = requests.get(
-            "https://www.googleapis.com/books/v1/volumes",
-            params={
-                "q": search_query,
-                "maxResults": 5,
-                "langRestrict": "es",  # preferir libros en español
-                "orderBy": "relevance"
-            },
-            timeout=10
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        if not data.get("items"):
-            raise ValueError("No se encontraron libros")
-
-        # Elegir un libro al azar entre los primeros resultados
-        book = random.choice(data["items"])["volumeInfo"]
-        return {
-            "title": book.get("title", "Sin título"),
-            "author": ", ".join(book.get("authors", ["Autor desconocido"])),
-            "url": book.get("infoLink", "#"),
-            "description": book.get("description", "")[:200] + "..." if book.get("description") else ""
-        }
-    except Exception as e:
-        logger.error(f"Error obteniendo recomendación de libro: {str(e)}")
-        raise
+def get_book_recommendation(emotion, secondary_emotion):
+    """
+    Por ahora retornamos un libro hardcodeado mientras arreglamos la API.
+    """
+    return {
+        "title": "Temporalmente no disponible",
+        "author": "Intente más tarde",
+        "url": "#",
+        "description": "El servicio de recomendación de libros está temporalmente no disponible."
+    }
 
 def get_psychological_advice(emotion):
     """Obtiene consejos psicológicos y frases motivacionales según la emoción."""
